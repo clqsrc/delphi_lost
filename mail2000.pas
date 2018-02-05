@@ -4615,7 +4615,8 @@ begin
     Texto:=sDecode;//要解码的内容
 
     //解码
-        case (sEncoding[1]) of
+    //    case (sEncoding[1]) of
+        case (UpperCase(sEncoding)[1]) of
 
           'B':
           begin
