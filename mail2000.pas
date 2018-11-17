@@ -4695,8 +4695,12 @@ end;
 
 function TMailMessage2000.GetDate: TDateTime;
 begin
-
+  Result := 0;
+  try
   Result := MailDateToDelphiDate(TrimSpace(GetLabelValue('Date')));
+  except
+  end;
+
 end;
 
 // Set the date in RFC822 format
