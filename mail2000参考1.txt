@@ -1,0 +1,613 @@
+
+
+http://bbs.chinaunix.net/thread-855218-1-1.html
+
+這是我寫的一個發送簡單郵件的
+以前用來封裝做Oracle外部過程發email
+你看看有沒有幫助
+smtp.h
+
+
+    #ifndef _GNU_SOCK_SMTP_H
+    #define _GNU_SOCK_SMTP_H
+
+    #include <string.h>
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <stdarg.h>
+
+
+    #ifdef WIN32
+            #include <winerror.h>
+            #include <wininet.h>
+            #include <winsock.h>
+            #include <stdint.h>
+            #include <ws2tcpip.h>
+            #define  close   closesocket
+
+            #define sockstart(name)  \
+                    WSADATA name;  \
+                    if (WSAStartup(MAKEWORD(1,1) ,&name)){   \
+                            perror("sockstart") ;  \
+                    }
+
+            #define sockend()  WSACleanup()
+
+    #else
+            #include <unistd.h>
+            #include <sys/socket.h>
+            #include <sys/types.h>
+            #include <arpa/inet.h>
+            #include <netinet/in.h>
+            #include <netdb.h>
+
+            #define sockstart(name)
+            #define sockend()
+
+    #endif
+
+
+
+
+
+
+
+
+
+
+    /* Write By: Gan Jian Hui
+    * Date :2006-06-10
+    *
+    */
+
+
+
+    #define m_strcpy(dest,src)  _m_strcpy(&dest,src)
+
+
+    /* The MailHeader
+    */
+    typedef struct
+    {
+            char *mailFrom ;
+            char *mailTo ;
+            char *ccTo ;
+            char *mailHost ;
+            char *userName ;
+            char *passWord ;
+    } MailHeader,*pMailHeader ;
+
+    #define INIT_MAILHEADER(header) \
+            header = malloc(sizeof(MailHeader)) ;\
+            memset(header,0,sizeof(MailHeader))
+
+    #define FREE_MAILHEADER(header) \
+            free(header -> mailFrom); \
+            free(header -> mailTo); \
+            free(header -> ccTo); \
+            free(header -> mailHost) ; \
+            free(header->userName) ; \
+            free(header->passWord) ; \
+            free(header)
+
+
+    /* The Mail Information  */
+    typedef struct
+    {
+            MailHeader *header ;
+            char *subject;
+            char *contentType;
+            char *mailBody ;
+            char *charSet ;
+    } Mail,*pMail ;
+
+
+
+    #define INIT_MAIL(mail) \
+            mail = malloc(sizeof(Mail)) ;\
+            memset(mail,0,sizeof(Mail));\
+            INIT_MAILHEADER(mail->header)
+
+           
+
+    #define FREE_MAIL(mail) \
+            free(mail -> subject) ; \
+            free(mail -> contentType) ; \
+            free(mail -> mailBody) ; \
+            free(mail -> charSet) ; \
+            if ( mail->header) { FREE_MAILHEADER(mail-> header);} \
+            free(mail)
+
+    /*encoding base64
+    */
+                         
+    int Base64Enc(char *buf,char *text) ;
+    int Base64Dec(char *buf,char*text,int size) ;
+           
+
+
+    int DecodeQuoted(const char* pSrc, unsigned char* pDst, int nSrcLen) ;
+    int EncodeQuoted(const unsigned char* pSrc, char* pDst, int nSrcLen, int nMaxLineLen,int action) ;
+    char* EncodeQuotednew(const unsigned char* pSrc, int nSrcLen, int nMaxLineLen) ;
+
+
+           
+    int hostsend(int sock, char *format, ...) ;
+    int hostconnect(const  char *hostname,  uint16_t   port) ;
+
+    int sendsmtpmail(int sockfd, Mail *mail) ;
+
+
+    void die(const char *fmt, ...) ;
+
+    #endif
+
+复制代码
+
+
+smtp.c
+
+
+    #define _GNU_SOURCE
+    #include <stdio.h>
+    #include <string.h>
+    #include <unistd.h>
+    #include <time.h>
+    #include <stdio.h>
+    #include "smtp.h"
+
+
+    /* ¨?￥?ˉ?C?P¨￥1ê2{ */
+
+
+
+    char *_m_strcpy(char **dest, const char *src)
+    {
+            *dest = (char *)malloc( strlen(src)+1 ) ;
+            strcpy(*dest,src);
+            return  *dest ;
+    }
+
+
+
+    int  readsocket(int sockfd,const char  *stop)
+    {
+            int iResult =0 ;
+            const int bsize =256 ;
+            char buf[ bsize +1] ;
+            while  (( iResult = recv(sockfd, buf, bsize,0 )) > 0) {
+                    buf[iResult] = '\0';
+    /*                printf(buf) ; */
+                    if  ((stop) && (strstr(buf,stop)!=NULL)) break   ;
+            }
+            return iResult ;
+    }
+
+
+    int sendsmtpmail(int sockfd, Mail *mail)
+    {
+            char sendbuff[256];
+            char Date[36];
+             
+            time_t td;
+            char *src ,*mTo;
+            char *ptr ;
+            int len ,mlen;
+            char *pdata=NULL;
+
+
+            readsocket(sockfd,"220") ;
+            hostsend(sockfd,"HELO \r\n") ;
+            readsocket(sockfd,"250") ;
+
+            hostsend(sockfd,"EHLO\r\n") ;
+            readsocket(sockfd,"250") ;
+            /*  user password  */
+            if (NULL != mail->header->userName) {
+                    hostsend(sockfd,"AUTH LOGIN \r\n") ;
+                    readsocket(sockfd,"334") ;
+           
+                    Base64Enc(sendbuff, mail->header->userName) ;
+                    hostsend(sockfd,"%s\r\n",sendbuff);
+                    Base64Enc(sendbuff, mail->header->passWord) ;
+                    hostsend(sockfd,"%s\r\n",sendbuff);
+                    readsocket(sockfd,"235") ;
+            }
+            hostsend(sockfd,"RSET\r\n",sendbuff);
+
+            hostsend(sockfd,"MAIL FROM: <%s> \r\n", mail->header->mailFrom) ;
+            readsocket(sockfd,"250") ;
+                    src=mail->header->mailTo ;
+            mTo=(char *)malloc(60) ;
+
+            memset(mTo,0,sizeof(mTo)) ;
+            ptr=mTo ;
+            while ((*ptr++ = *src ++)){
+                    if ((*src == ',') ||(*src =='\0' )) {
+                            *ptr='\0' ;
+                            hostsend(sockfd,"RCPT TO: <%s> \r\n",mTo) ;
+                            readsocket(sockfd,"250") ;
+                            ptr = mTo ;
+                            src++ ;
+                    }
+            }
+            free(mTo);
+
+            /*
+            hostsend(sockfd,"RCPT TO: <%s> \r\n", mail->header->mailTo) ;
+            readsocket(sockfd,"250") ;
+            */
+            time(&td);
+            len=(int)strftime(Date,sizeof(Date), "%A %b %d %H:%M:%S %Y",localtime(&td));
+            Date[len]=0;
+
+
+
+            mlen  = strlen(mail->mailBody)  ;
+
+    /*        len : length of encodequoted
+    */
+            len = EncodeQuoted((unsigned char *) mail->mailBody , pdata ,mlen ,80 ,0) ;
+           
+            pdata=(char *)malloc(len+1) ;
+            memset(pdata,0, len + 1) ;
+
+            EncodeQuoted((unsigned char *) mail->mailBody , pdata ,mlen ,80 ,1) ;
+
+    /*        pdata= EncodeQuotednew((unsigned char *) mail->mailBody ,len  ,80 ) ; */
+
+                   
+            hostsend(sockfd,"DATA\r\n") ;
+            readsocket(sockfd,"354") ;
+
+            hostsend(sockfd, "From:%s\r\nTo: %s \r\n",
+                    mail->header->mailFrom,
+                    mail->header->mailTo);
+
+    /*mime head         */
+            hostsend(sockfd,"Subject: %s \r\n\
+    Date:%s\r\n\
+    Mime-Version: 1.0 \r\n\
+    Content-Type:%s \r\n\r\n",        mail->subject,
+                    Date,
+                    mail->contentType);
+
+    /*mine content data */
+            hostsend(sockfd,"--quinoa\r\n\
+    Content-Type: text/plain;\r\n \
+            charset=\"%s\" \r\n\
+    Content-Transfer-Encoding: quoted-printable \r\n\r\n\
+    %s\r\n",mail->charSet ,  pdata) ;
+
+            free((void *)pdata) ;
+           
+
+
+
+            hostsend(sockfd,"\r\n.\r\n") ; /*end data */
+            readsocket(sockfd,"250") ;
+            hostsend(sockfd,"QUIT\r\n") ;
+            readsocket(sockfd,"221") ;
+
+            return 0 ;
+    }
+
+
+    /*encoding base64
+    */
+                         
+    int Base64Enc(char *buf,char *text)
+    {
+            static char *base64_encoding="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            int buflen=0;
+            int size=strlen(text);
+                           
+            while(size>0)
+            {
+                    *buf++=base64_encoding[(text[0]>>2)&0x3f];
+                    if(size>2)
+                    {
+                            *buf++=base64_encoding[((text[0]&3)<<4)|(text[1]>>4)] ;
+                            *buf++=base64_encoding[((text[1]&0xF)<<2)|(text[2]>>6)];
+                            *buf++=base64_encoding[text[2]&0x3f];
+                    }
+                    else
+                    {
+                            switch(size)
+                            {
+                                    case 1:
+                                            *buf++=base64_encoding[(text[0]&3)<<4];
+                                            *buf++='=';
+                                            *buf++='=';
+                                            break;
+                                    case 2:
+                                            *buf++=base64_encoding[((text[0]&3)<<
+    4)|(text[1]>>4)];
+                                            *buf++=base64_encoding[((text[1]&0x0F
+    )<<2)|(text[2]>>6)];
+                                            *buf++='=';
+                                            break;
+                            }
+                    }
+                    text+=3;
+                    size-=3;
+                    buflen+=4;
+            }
+                                                                                 
+                           
+            *buf=0;
+            return buflen;
+    }
+                     
+
+
+    char GetBase64Value(char ch)
+    {
+            if ((ch >= 'A') && (ch <= 'Z'))
+                    return ch - 'A';
+            if ((ch >= 'a') && (ch <= 'z'))
+                    return ch - 'a' + 26;
+            if ((ch >= '0') && (ch <= '9'))
+                    return ch - '0' + 52;
+            switch (ch)
+            {
+                    case '+':
+                            return 62;
+                    case '/':
+                            return 63;
+                    case '=': /* base64 padding */
+                            return 0;
+                    default:
+                            return 0;
+            }
+    }
+
+
+
+
+    int Base64Dec(char *buf,char*text,int size)
+    {
+            unsigned char chunk[4];
+
+            int parsenum=0;
+
+
+            if(size%4)
+                    return -1;
+
+            while(size>0)
+            {
+                    chunk[0] = GetBase64Value(text[0]);
+                    chunk[1] = GetBase64Value(text[1]);
+                    chunk[2] = GetBase64Value(text[2]);
+                    chunk[3] = GetBase64Value(text[3]);
+
+                    *buf++ = (chunk[0] << 2) | (chunk[1] >> 4);
+                    *buf++ = (chunk[1] << 4) | (chunk[2] >> 2);
+                    *buf++ = (chunk[2] << 6) | (chunk[3]);
+
+                    text+=4;
+                    size-=4;
+                    parsenum+=3;
+            }
+
+            return parsenum;
+    }
+
+
+
+
+    int hostsend(int sock, char *format, ...)
+    {
+            char BUFFER[1024] ;
+            va_list argptr ;
+            va_start(argptr, format) ;
+            vsnprintf(BUFFER, sizeof(BUFFER), format, argptr) ;
+            va_end(argptr) ;
+    /*        printf("%s",BUFFER) ; */
+            return send(sock, BUFFER, strlen(BUFFER), 0) ;
+    }
+
+    int  hostconnect(const  char *hostname,  uint16_t   port)
+    {
+            int  sockfd ;
+            struct hostent *host ;
+            struct sockaddr_in client_addr;
+
+            if((host=gethostbyname( hostname ))==NULL) {
+                    perror("gethostbyname");
+                    return (-1) ;
+            }
+
+
+            if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+                    perror("sockfd ");
+                    return (-2);
+            }
+            client_addr.sin_family=AF_INET;
+            client_addr.sin_port=htons( port );
+            client_addr.sin_addr = *((struct in_addr *)host->h_addr);
+
+            memset(&(client_addr.sin_zero),0,8) ;
+            if (connect(sockfd, (struct sockaddr *)&client_addr,                 sizeof(struct sockaddr)) == -1) {
+                    perror("Connec Error");
+                    return -3 ;
+            }
+
+
+            return (sockfd );
+    }
+
+
+
+
+    void die(const char *fmt, ...)
+    {
+            va_list ap;
+            va_start(ap, fmt);
+            vfprintf(stderr, fmt, ap);
+            va_end(ap);
+            exit(EXIT_FAILURE);
+    }
+
+
+    /*Content-Transfer-Encoding: quoted-printable
+    //encode
+    */
+    int EncodeQuotedLength(const unsigned char* pSrc, int nSrcLen, int nMaxLineLen)
+    {
+            int nDstLen;  
+            int nLineLen;
+            int i ;
+
+
+            nDstLen = 0;
+            nLineLen = 0;
+            for (i = 0; i < nSrcLen; i++, pSrc++)
+            {
+                    if ((*pSrc >= '!') && (*pSrc <= '~') && (*pSrc != '='))
+                    {
+                            nDstLen++;
+                            nLineLen++;
+                    }
+                    else
+                    {
+                            nDstLen += 3;
+                            nLineLen += 3;
+                    }
+
+                    if (nLineLen >= nMaxLineLen - 3)
+                    {
+                            nDstLen += 3;
+                            nLineLen = 0;
+                    }
+            }
+
+            return nDstLen;
+    }
+
+    /*
+    //Description :quoted-printable encoding
+    //
+    */
+
+    int EncodeQuoted(const unsigned char* pSrc, char* pDst, int nSrcLen, int nMaxLineLen,int action)
+    {
+            int nDstLen;  
+            int nLineLen;
+            char *dst =pDst ;
+            int i ;
+
+
+            nDstLen = 0;
+            nLineLen = 0;
+            for (i = 0; i < nSrcLen; i++, pSrc++) {
+                    if ((*pSrc >= '!') && (*pSrc <= '~') && (*pSrc != '=')) {
+                            if  (action)  *dst++ = (char)*pSrc;
+                            nDstLen++;
+                            nLineLen++;
+                    } else {
+                            if (action) {
+                                    sprintf(dst, "=%02X", *pSrc);
+                                    dst += 3;
+                            }
+                            nDstLen += 3;
+                            nLineLen += 3;
+                    }
+
+                    if (nLineLen >= nMaxLineLen - 3) {       
+                            if (action) {
+                                    sprintf(dst, "=\r\n");
+                                    dst += 3;
+                            }
+                            nDstLen += 3;
+                            nLineLen = 0;
+                    }
+            }
+
+            if (action) *dst = '\0';
+
+            return nDstLen;
+    }
+
+    #ifdef LINUX
+
+    char *EncodeQuotednew(const unsigned char* pSrc, int nSrcLen, int nMaxLineLen)
+    {
+            int nLineLen;
+            char *pDst ;
+
+            size_t size;
+            FILE *stream;
+            int i;
+            stream = open_memstream ((char **)&pDst,(size_t *) &size);
+
+            nLineLen = 0;
+
+            for (i = 0; i < nSrcLen; i++, pSrc++)
+            {
+                    if ((*pSrc >= '!') && (*pSrc <= '~') && (*pSrc != '=')) {
+                            fprintf(stream,"%c",(const char) *pSrc );
+                            nLineLen++;
+                    } else {
+                            fprintf (stream,"=%02X" , *pSrc );
+                            nLineLen += 3;
+                    }
+
+                    if (nLineLen >= nMaxLineLen - 3) {
+                            fprintf (stream,"=\r\n" );
+                            nLineLen = 0;
+                    }
+            }
+
+            fprintf (stream,"%c",'\0' );
+            fclose(stream) ;
+
+            return pDst;
+    }
+
+
+
+
+    #endif
+
+
+
+
+
+
+    int DecodeQuoted(const char* pSrc, unsigned char* pDst, int nSrcLen)
+    {
+            int nDstLen;   
+            int i;
+
+            i = 0;
+            nDstLen = 0;
+
+            while (i < nSrcLen) {
+                    if (strncmp(pSrc, "=\r\n", 3) == 0)   {
+                            pSrc += 3;
+                            i += 3;
+                    }
+                    else {
+                            if (*pSrc == '=')   {       
+                                    sscanf(pSrc, "=%02X",(unsigned int *) pDst);
+                                    pDst++;
+                                    pSrc += 3;
+                                    i += 3;
+                            } else  {
+                                    *pDst++ = (unsigned char)*pSrc++;
+                                    i++;
+                            }
+
+                            nDstLen++;
+                    }
+            }
+
+            *pDst = '\0';
+            return nDstLen;
+    }
+
+复制代码
+实战分享：从技术角度谈机器学习入门| 【大话IT】RadonDB低门槛向MySQL集群下战书 | ChinaUnix打赏功能已上线！ | 新一代分布式关系型数据库RadonDB知多少？
+

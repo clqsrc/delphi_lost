@@ -333,6 +333,7 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   CVCode,//big5,
+  DateUtils,
   IdCoderQuotedPrintable,
   StrUtils,
   WinSock, ScktComp, Math, Registry, ExtCtrls;
@@ -777,6 +778,7 @@ procedure Register;
 { Very useful functions ====================================================== }
 
 function DecodeLine7Bit(Texto: String): String; forward;
+function DecodeLine7Bit_m(s: String): String;
 function EncodeLine7Bit(Texto, Charset: String): String; forward;
 
 
@@ -1050,6 +1052,7 @@ var
   prop1, prop2:string;//这个字符串的属性,可能是字符集或编码方式,顺序并不固定
 
 begin
+  Result := DecodeLine7Bit_m(Texto); Exit; //clq 2018/12/9 
 
   Result := TrimSpace(Texto);
 
@@ -1200,7 +1203,50 @@ end;
 // Decode a quoted-printable encoded string
 
 
-//clq 参考了一个c语言的算法
+//clq 参考了一个c语言的算法//忘记在哪看到的了，似乎是 https://bbs.csdn.net/topics/110165494
+(*
+int DecodeQuoted(const char* pSrc, unsigned char* pDst, int nSrcLen)
+{
+    int nDstLen;        // 输出的字符计数
+    int i;
+
+    i = 0;
+    nDstLen = 0;
+
+    while (i < nSrcLen)
+    {
+        if (strncmp(pSrc, "=\r\n", 3) == 0)        // 软回车，跳过
+        {
+            pSrc += 3;
+            i += 3;
+        }
+        else
+        {
+            if (*pSrc == '=')        // 是编码字节
+            {
+                sscanf(pSrc, "=%02X", pDst);
+                pDst++;
+                pSrc += 3;
+                i += 3;
+            }
+            else        // 非编码字节
+            {
+                *pDst++ = (unsigned char)*pSrc++;
+                i++;
+            }
+
+            nDstLen++;
+        }
+    }
+
+    // 输出加个结束符
+    *pDst = '\0';
+
+    return nDstLen;
+}
+将解码之后的数据用mbstocws成unicode即可
+有中文的话需要先调用setlocale(LC_ALL,"chs");
+*)
 function DecodeQuoted(pSrc:pchar):string;
 var
     nDstLen:integer;        // 输出的字符计数
@@ -2093,6 +2139,30 @@ begin
   end;
 end;
 
+//clq 原 GetTimeZoneBias 有问题，直接用二者时间差算出好了
+function GetTimeZoneBias_v2: Double;
+var
+  SystemTime: TSystemTime;
+  LocalTime: TSystemTime;
+  tl:TDateTime;
+  ts:TDateTime;
+begin
+  GetLocalTime(LocalTime);     //本地时间
+  GetSystemTime(SystemTime);   //GetSystemTime:所返回的是UTC
+
+  tl := EncodeTime(LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond, LocalTime.wMilliseconds);
+  ts := EncodeTime(SystemTime.wHour, SystemTime.wMinute, SystemTime.wSecond, SystemTime.wMilliseconds);
+
+  //DateUtils.HourSpan()
+  //DateUtils.HoursBetween()
+  //在两个TDATE时间值之间调用HurStun，以小时为单位获得差异。HourSpan不像HoursIntern函数那样只计算整个小时，它报告的不完整小时只是整个小时的一小部分
+
+  //两个都不能用，因为那是绝对值
+
+  Result := 24 * (tl - ts); //TDateTime 的差是天数，所以乘 24 就可追踪以得到小时数了. HourSpan 源码也是如此
+
+end;  
+
 // Return the Timezone adjust in days
 
 function GetTimeZoneBias: Double;
@@ -2100,6 +2170,7 @@ var
   TzInfo: TTimeZoneInformation;
 
 begin
+  Result := GetTimeZoneBias_v2; Exit; //clq 
 
   case GetTimeZoneInformation(TzInfo) of
 
@@ -2110,6 +2181,8 @@ begin
     else Result := 0;
   end;
 end;
+
+
 
 // Fills left of string with char
 
@@ -2562,6 +2635,255 @@ begin
   Result := Copy(S, 1, I);
 end;
 
+//clq  2018/12/8
+//分割字符串 ExtractStrings
+type
+  TCmds = array[0..9] of string;
+
+function DecodeCmds(s: String; sp :char):TCmds; //算法不好，临时用而已
+var
+  //s: String;
+  List: TStringList;
+  i:Integer;
+begin
+  //s := 'about: #delphi; #pascal, programming';
+  List := TStringList.Create;
+  //ExtractStrings([';',',',':'],['#',' '],PChar(s),List);
+  //第一个参数是分隔符; 第二个参数是开头被忽略的字符
+
+//  ShowMessage(List.Text);  //about
+//                           //delphi
+//                           //pascal
+//                           //programming
+
+  //ExtractStrings([' '],[],PChar(s),List);
+  ExtractStrings([sp],[],PChar(s),List);
+  //StringReplace(s, #9, ' ');//tab 要替换掉
+
+  for i := 0 to List.Count-1 do
+  begin
+    Result[i] := List[i];
+
+    if i>=9 then Break;
+  end;
+
+  List.Free;
+end;
+
+//clq 2018/12/8 原来的解码兼容性太差了
+//最复杂的格式类似于 Date: Fri, 7 Dec 2018 14:42:17 +0800 (CST)
+//其中根据 https://www.w3.org/Protocols/rfc822/#z28 或者 rfc5322 先要判断有无周日日期部分，然后再分割后面的就可以了
+{
+5. Date and Time Specification
+5.1. SYNTAX
+
+date-time   =  [ day "," ] date time        ; dd mm yy
+                                            ;  hh:mm:ss zzz
+
+day         =  "Mon"  / "Tue" /  "Wed"  / "Thu"
+            /  "Fri"  / "Sat" /  "Sun"
+
+date        =  1*2DIGIT month 2DIGIT        ; day month year
+                                            ;  e.g. 20 Jun 82
+
+month       =  "Jan"  /  "Feb" /  "Mar"  /  "Apr"
+            /  "May"  /  "Jun" /  "Jul"  /  "Aug"
+            /  "Sep"  /  "Oct" /  "Nov"  /  "Dec"
+
+time        =  hour zone                    ; ANSI and Military
+
+hour        =  2DIGIT ":" 2DIGIT [":" 2DIGIT]
+                                            ; 00:00:00 - 23:59:59
+
+zone        =  "UT"  / "GMT"                ; Universal Time
+                                            ; North American : UT
+            /  "EST" / "EDT"                ;  Eastern:  - 5/ - 4
+            /  "CST" / "CDT"                ;  Central:  - 6/ - 5
+            /  "MST" / "MDT"                ;  Mountain: - 7/ - 6
+            /  "PST" / "PDT"                ;  Pacific:  - 8/ - 7
+            /  1ALPHA                       ; Military: Z = UT;
+                                            ;  A:-1; (J not used)
+                                            ;  M:-12; N:+1; Y:+12
+            / ( ("+" / "-") 4DIGIT )        ; Local differential
+                                            ;  hours+min. (HHMM)
+
+5.2. SEMANTICS
+If included, day-of-week must be the day implied by the date specification.
+
+Time zone may be indicated in several ways. "UT" is Universal Time (formerly called "Greenwich Mean Time"); "GMT" is permitted as a reference to Universal Time. The military standard uses a single character for each zone. "Z" is Universal Time. "A" indicates one hour earlier, and "M" indicates 12 hours earlier; "N" is one hour later, and "Y" is 12 hours later. The letter "J" is not used. The other remaining two forms are taken from ANSI standard X3.51-1975. One allows explicit indication of the amount of offset from UT; the other uses common 3-character strings for indicating time zones in North America. 
+}
+//所以 Fri, 7 Dec 2018 14:42:17 +0800 (CST) 可以分解为
+//day_of_week = Fri
+//day = 7
+//month = Dec
+//year = 2018
+//time = 14:42:17
+//TimeZone = +0800
+//TimeZone_name = (CST)
+//其中 TimeZone_name 应该是 rfc822 中的，而 rfc5322 应该是加了它的数字表示，也就是 TimeZone 部分
+function MailDateToDelphiDate_v2(DateStr: String): TDateTime;
+const
+  Months: String = 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec,';
+
+var
+  Field, Loop: Integer;
+  //Hour, Min, Sec, Year, Month, Day: Double;
+  fHour, fMin, fSec, fYear, fMonth, fDay: Double;
+  //sHour, sMin, sSec, sYear, sMonth, sDay, sTZ: String;
+  sHour, sMin, sSec, sYear, sMonth, sDay: String;
+  HTZM, MTZM: Word;
+  STZM: Integer;
+  TZM: Double;
+  Final: Double;
+  //day_of_week:string;
+  dateField:tcmds;
+  timeField:tcmds;
+
+  day_of_week:string;
+  day:string;
+  month:string;
+  year:string;
+  time:string;
+  TimeZone:string;
+  TimeZone_name:string;
+
+  hour, min, sec:string;
+
+  mailTimeZone:Double;
+  localTimeZone:Double;
+
+begin
+
+  sHour := '';
+  sMin := '';
+  sSec := '';
+  sYear := '';
+  sMonth := '';
+  sDay := '';
+  //sTZ := '';
+
+  DateStr := StringReplace(DateStr, #9, ' ', [rfReplaceAll]); //tab 要替换掉
+  DateStr := StringReplace(DateStr, '  ', ' ', [rfReplaceAll]); //简单合并一下多空格
+  DateStr := StringReplace(DateStr, '  ', ' ', [rfReplaceAll]); //简单合并一下多空格
+
+  //dateField := DecodeCmds(DateStr, ' ');
+  dateField := DecodeCmds(DateStr, #32);
+
+  day_of_week   := dateField[0];
+  day           := dateField[1];
+  month         := dateField[2];
+  year          := dateField[3];
+  time          := dateField[4];
+  TimeZone      := dateField[5];
+  TimeZone_name := dateField[6];
+
+  timeField := DecodeCmds(time, ':');
+  hour := timeField[0];
+  min  := timeField[1];
+  sec  := timeField[2];
+
+  //--------------------------------------------------
+
+  sDay := day;
+  sMonth := month;
+  sYear := year;
+  sHour := hour;
+  sMin := min;
+  sSec := sec;
+  //sTZ := TimeZone;
+
+
+  fHour := StrToIntDef(sHour, 0);
+  fMin := StrToIntDef(sMin, 0);
+  fSec := StrToIntDef(sSec, 0);
+  fYear := StrToIntDef(sYear, 0);
+  fDay := StrToIntDef(sDay, 0);
+
+  //if sMonth[1] in ['0'..'9'] then
+  if (Length(sMonth)>0)and(sMonth[1] in ['0'..'9']) then
+    fMonth := StrToIntDef(sMonth, 0)
+  else
+    fMonth := (Pos(sMonth, Months)-1) div 4 + 1;  //这也最个比较巧妙的算法，查找子字符串
+
+    if fYear < 100 then  //应该是纠正 2000 年
+    begin
+
+      if fYear < 50 then
+        fYear := 2000 + fYear
+      else
+        fYear := 1900 + fYear;
+    end;
+
+    if (fYear = 0) or (fMonth = 0) or (fDay = 0) then
+    begin
+      Result := 0;
+      Exit;
+    end;
+
+//    else
+//    begin
+//
+
+    Result := EncodeDate(Trunc(fYear), Trunc(fMonth), Trunc(fDay))
+      + fHour*(1/24) + fMin*(1/24/60) + fSec*(1/24/60/60);
+
+    if Length(TimeZone) = 0 then Exit; //可能没有时区
+
+    //时区可能由两部分也可能由一部分组成,旧格式只有时区字符，很啰嗦，所以可以只考虑有新格式的情况
+    if (TimeZone[1] in ['+', '-']) then
+    begin
+      mailTimeZone := StrToIntDef(TimeZone, 0);
+      mailTimeZone := mailTimeZone * 0.01;
+      localTimeZone := GetTimeZoneBias_v2();
+
+      Result := Result - mailTimeZone / 24; //邮件时区时间要还原成 gmt 时间
+      Result := Result + localTimeZone / 24; //加上当前时区的时间差就可以了//GetTimeZoneBias_v2 得到的是小时数，所以还要除以 24
+
+    end
+    else //旧格式，当作 gmt 处理就可以了
+    begin
+      Result := Result + GetTimeZoneBias_v2 / 24; //加上当前时区的时间差就可以了//GetTimeZoneBias_v2 得到的是小时数，所以还要除以 24
+    end;
+
+//      if (sTZ = 'GMT') or (Length(Trim(sTZ)) <> 5) then
+//      begin
+//
+//        STZM := 1;
+//        HTZM := 0;
+//        MTZM := 0;
+//      end
+//      else
+//      begin
+//
+//        STZM := StrToIntDef(Copy(sTZ, 1, 1)+'1', 1);
+//        HTZM := StrToIntDef(Copy(sTZ, 2, 2), 0);
+//        MTZM := StrToIntDef(Copy(sTZ, 4, 2), 0);
+//      end;
+//
+//      try
+//        //clq 2003.7.5 修正
+//        if (Trunc(Year)=0)or (Trunc(Month)=0)or (Trunc(Day)=0) then
+//        begin
+//          Result := 0;
+//          exit;
+//        end;
+//        //clq 2003.7.5 修正
+//
+//        TZM := EncodeTime(HTZM, MTZM, 0, 0)*STZM;
+//        Final := EncodeDate(Trunc(Year), Trunc(Month), Trunc(Day));
+//        Final := Final + Hour*(1/24) + Min*(1/24/60) + Sec*(1/24/60/60);
+//        Final := Final - TZM + GetTimeZoneBias;
+//
+//        Result := Final;
+//
+//      except
+//
+//        Result := 0;
+//      end;
+//    end;
+
+end;
+
 // Convert date from message to Delphi format
 // Returns zero in case of error
 
@@ -2583,6 +2905,8 @@ var
   Final: Double;
 
 begin
+
+  Result := MailDateToDelphiDate_v2(DateStr); Exit;
 
   sHour := '';
   sMin := '';
@@ -2699,6 +3023,7 @@ end;
 
 // Convert numeric date to mail format
 
+//clq 2018 这个明显有问题
 function DelphiDateToMailDate(const Date: TDateTime): String;
 const
   Months: String = 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec,';
@@ -2926,7 +3251,8 @@ begin
       if Length(line)<1 then Break;
       if not(line[1] in [' ', #9]) then Break; //不是空格和 tab 开头就跳出了
 
-      Result := Result + FHeader[i];
+      //Result := Result + FHeader[i];
+      Result := Result + #13#10 + FHeader[i]; //clq 2018 还是加硬回车，后面再处理
     end;
     //--------------------------------------------------
 
@@ -4509,6 +4835,63 @@ begin
       SetLabelValue(_FRT, '');
 end;
 
+
+
+//取标签的算法已经分成两个了，所以可以按 贪婪算法 了。即取首尾 =? ?= 之间的字符串就可以了
+function find_decode_string_v2(s: String;
+  var lstr:string;//合法字符串左边的字符串
+  var rstr1:string;//处理后余下的字符串
+  var sEncoding: string;//编码规则
+  var sCharset: string;//字符集
+  var sDecode:string//要解码的部分
+  ): boolean;//寻找一个合法的编码字符串
+var
+  pos1,pos2,pos3,pos4:integer;
+  //rs1:string;//要解码的一部分
+begin
+  result := False;
+
+  s := Trim(s);
+
+  if Length(s)<5 then Exit; //长度不足
+
+  if pos('=?',s)<1 then Exit; //没有首尾标识字符
+
+  if RightStr(s, 2)<>'?=' then Exit; //没有首尾标识字符
+
+  s := Copy(s, 3, Length(s)-4); //去掉首尾标识字符
+
+    ////////////////////////////////////////余下 UTF-8?Q?
+    pos2:=pos('?',s);//查找 第1个 "?"
+    if pos2<1 then exit;
+
+    sCharset:=copy(s,1,pos2-1);//取出  =?UTF-8?Q? 中的 UTF-8
+    rstr1:=copy(s,pos2+1,length(s));//临时处理后余下的字符串
+    s:=rstr1;//临时处理后余下的字符串
+
+    if length(sCharset)=0 then exit;//不能为空
+    ////////////////////////////////////////余下 Q?......
+    pos3:=pos('?',s);//查找 第2个 "?"
+    if pos3<1 then exit;
+
+    sEncoding:=copy(s,1,pos3-1);//取出  Q? 中的 Q
+    rstr1:=copy(s,pos3+1,length(s));//临时处理后余下的字符串
+    s:=rstr1;//临时处理后余下的字符串
+
+    if length(sEncoding)=0 then exit;//不能为空
+
+    sDecode := s;//临时处理后余下的字符串
+
+
+
+  Result := True;
+
+  //原版函数也还是有用的，例如以下标题新算法就不行，不过那样处理就太麻烦了，以后再改进吧
+  //Subject: =?UTF-8?B?5oKo55qE5paw5a+G56CB55qE55So5oi35biQ5oi35LiKY28=?=.de
+  //Subject: =?gb2312?Q?FW:_newbt.?= =?gb2312?B?bmV00/LD+8PcwuvNqNaq?=
+
+end;
+
 //clq add//按 OE 的算法,应当是在 [=?] [?=] 内的按解码算法,在这之外的都按一般算法,其中[?=]不是贪婪算法,而是取第一个
 
 function find_decode_string(s: String;
@@ -4522,6 +4905,9 @@ var
   pos1,pos2,pos3,pos4:integer;
   //rs1:string;//要解码的一部分
 begin
+
+  Result := find_decode_string_v2(s, lstr,rstr1, sEncoding, sCharset, sDecode); Exit;  //用新算法
+
   result:=false;
   //while true do
   begin
@@ -4577,10 +4963,10 @@ begin
   result:=true;
 end;
 
+
 function DecodeLine7Bit_m(s: String): String;
 var
   pos1,pos2:integer;
-  i1:integer;//保护
 
   var lstr:string;//合法字符串左边的字符串
   var rstr1:string;//处理后余下的字符串
@@ -4591,28 +4977,41 @@ var
   Buffer: PChar;
   Texto: String;
   Size:integer;
-
+  sl:TStringList;
+  i:Integer;
 begin
-  i1:=0;
-  result:='';
-  while true do
+
+  Result := '';
+
+
+  sl := TStringList.Create;
+  sl.Text := s;
+
+  for i := 0 to sl.Count-1 do
   begin
-    i1:=i1+1;
-    if i1>100 then
-    begin
-      showmessage('DecodeLine7Bit_m()严重错误!');
-      exit;
-    end;
-    //以上为保护代码
 
-    if not find_decode_string(s, lstr, rstr1, sEncoding, sCharset, sDecode) then
-    begin//不正常的字符串
-      result:=result+s;
-      exit;
-    end;
 
-    s:=rstr1;
-    Texto:=sDecode;//要解码的内容
+      //if not find_decode_string(s, lstr, rstr1, sEncoding, sCharset, sDecode) then
+      if not find_decode_string(sl[i], lstr, rstr1, sEncoding, sCharset, sDecode) then
+      begin//不正常的字符串
+        Result := Result + s;
+        //Exit;
+        //break;
+        Continue;
+      end;
+
+      //Texto:=sDecode;//要解码的内容
+      Texto := Texto + sDecode;//要解码的内容
+
+      Result := Result + sDecode;
+
+  end;
+
+  if Length(sEncoding)<1 then //没有编码信息则返回原文
+  begin
+    Result := s;
+    Exit;
+  end;  
 
     //解码
     //    case (sEncoding[1]) of
@@ -4651,18 +5050,40 @@ begin
         end;
 
     //clq//这样可以解决utf8编码的标题
-    if pos('utf-8',lowercase(sCharset))<>0
-      then Texto:=utf8toansi(Texto);
+    //clq 2018 还是有问题，如果 base64 折半了会出问题，因为 utf8 会有半个字符在上一行半个字符在下一行
+    //例如
+    //Subject: =?utf-8?B?6Z2e5Yeh6L2v5Lu256uZ55So5oi35ZCNY2xxZnTlrqHmoLjn?=
+    // =?utf-8?B?u5Pmnpwg5pe26Ze0OjIwMTgvMTEvMTIgMTU6MzM6NTQ=?=
+    //所以要合并后再解码为好
+//    if pos('utf-8',lowercase(sCharset))<>0
+//      then Texto := Utf8Decode(Texto); //Texto:=utf8toansi(Texto);
+//
+//    if pos('big5',lowercase(sCharset))<>0
+//      then Texto:=BIG5toGB(Texto);
 
-    if pos('big5',lowercase(sCharset))<>0
-      then Texto:=BIG5toGB(Texto);
-
-    result:=result+lstr+Texto;
+    //result:=result+lstr+Texto;
     //result:=result+Texto;
 
 
+  //end;
+  Result := Texto; //要放到前面来
+  if pos('utf-8',lowercase(sCharset))<>0 then
+  begin
+    //Texto := Utf8Decode(Texto);
+    //Texto := Utf8ToAnsi(Texto);
+    //utf8 解码可能出错，所以还要再处理一下。以后再用 iconv 等加强
+    result := Utf8ToAnsi(Texto);
+
+    if result='' then result := Texto; //有些标题，例如 pinterest 的信件中中间标题就是错误的(至少现在 [2018 年] 是这样)，所以要再恢复一下
+
   end;
 
+  if pos('big5',lowercase(sCharset))<>0 then
+  begin
+    result := BIG5toGB(Texto);
+  end;  
+
+  //result := Texto;
   //application.MainForm.caption:=result;
 
 end;
@@ -4671,12 +5092,36 @@ end;
 // Get the subject
 
 function TMailMessage2000.GetSubject: String;
+var
+  sl:TStringList;
+  i:Integer;
+  sCharset: string;
 begin
 
   //Result := DecodeLine7Bit(GetLabelValue('Subject'));
 
   //对于很多邮件系统,它们的标题是由很多[=?][?=]组成的,必须分开
+  sl := TStringList.Create;
+  sl.Text := GetLabelValue('Subject');
+  ////Result := DecodeLine7Bit_m(GetLabelValue('Subject'));
+
+  Result:= '';
+  sCharset := '';
+//  for i := 0 to sl.Count-1 do
+//  begin
+//    Result := Result + DecodeLine7Bit_m(sl.Strings[i], sCharset);
+//  end;
+
+  //Result := DecodeLine7Bit_m(GetLabelValue('Subject'), sCharset);
   Result := DecodeLine7Bit_m(GetLabelValue('Subject'));
+
+//  if pos('utf-8',lowercase(sCharset))<>0
+//    then Result := Utf8Decode(Result); //Texto:=utf8toansi(Texto);
+//
+//  if pos('big5',lowercase(sCharset))<>0
+//    then Result := BIG5toGB(Result);
+
+  sl.Free;
 end;
 
 
@@ -4704,6 +5149,7 @@ begin
 end;
 
 // Set the date in RFC822 format
+//golang 似乎是 rfc5322，不过也差不多
 
 procedure TMailMessage2000.SetDate(const Date: TDateTime);
 begin
