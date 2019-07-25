@@ -1,6 +1,8 @@
 //本文件为 clq 修改自 TMail2000 控件,修改只涉及编解码部分,通讯部分并没有用它
 //目前最新代码位于 https://github.com/clqsrc/delphi_lost
 
+// 2019/7/24 21:56:42 增加了一个邮件 mime 各个部分的未解码字符集的原始字符串属性，因为 utf-8 的 html 显示时需要。参考 self.Decoded_Bin 相关代码
+
 (*
 
 Component name...................: Mail2000 (Mail2000.pas)
@@ -371,7 +373,10 @@ type
 
     FHeader: TStringList {TMailText};
     FBody: TMemoryStream;
+    
+    // 2019/7/24 21:20:09 //clq 这个应该指的是解码后的结果
     FDecoded: TMemoryStream;
+
     FParentBoundary: String;
     FOwnerMessage: TMailMessage2000;
     FSubPartList: TMailPartList;
@@ -379,6 +384,7 @@ type
     FAttachedMessage: TMailMessage2000;
     FIsDecoded: Boolean;
     FEmbedded: Boolean;
+    FDecoded_Bin: TMemoryStream;
 
     function GetAttachInfo: String;
     function GetFileName: String;
@@ -388,6 +394,8 @@ type
     procedure Fill(Data: PChar; HasHeader: Boolean);
     procedure SetSource(const Text: String);
 
+  public
+    charset:string; // 2019/7/24 21:30:08//clq add 这个部分的字符集，例如 utf-8,gb2312 //已经转化为全小写  
   public
 
     constructor Create(AOwner: TComponent); override;
@@ -418,7 +426,11 @@ type
     property PartSource: String read GetSource write SetSource;
     property Header: TStringList read FHeader;                                // The header text
     property Body: TMemoryStream read FBody;                                  // The original body
+
+    // 2019/7/24 21:49:31//clq 这个是解码 base64 的字符集后的字符串，所以要加一个未解码字符集的
     property Decoded: TMemoryStream read FDecoded;                            // Stream with the body decoded
+    property Decoded_Bin: TMemoryStream read FDecoded_Bin;
+
     property SubPartList: TMailPartList read FSubPartList;                    // List of subparts of this mail part
     property FileName: String read GetFileName;                               // Name of file when this mail part is an attached file
     property AttachInfo: String read GetAttachInfo;                           // E.g. application/octet-stream
@@ -3196,6 +3208,7 @@ begin
   FHeader := TStringList.Create;
   FBody := TMemoryStream.Create;
   FDecoded := TMemoryStream.Create;
+  FDecoded_Bin := TMemoryStream.Create; //clq add // 2019/7/24 21:50:57
   FSubPartList := TMailPartList.Create;
   FOwnerPart := nil;
   FOwnerMessage := nil;
@@ -3961,6 +3974,7 @@ begin
 
   //clq
   f_charset1:=GetLabelParamValue(_C_T, 'charset');
+  Self.charset := f_charset1;
   //clq_end;
   
   //clq 这里应该改为全小写的,因为后面的都是与小写的字符串进行对比的,会引起错误
@@ -4061,6 +4075,10 @@ begin
   end;
 
   //clq//当内容是utf8的字符集的时候还是要转换的
+
+  // 2019/7/24 21:46:40 //html 有时候要使用未转换字符集的原文，所以要加一个属性先保存一下
+  self.Decoded_Bin.LoadFromStream(self.Decoded);
+
   if (lowercase(trim(f_charset1))='"utf-8"')or(lowercase(trim(f_charset1))='utf-8') then
   begin
     //原始内容在 self.FBody 中,解码后要写入 FDecoded
@@ -5210,7 +5228,7 @@ procedure TMailMessage2000.FindParts;
         end;
       end;
 
-      if (FTextHTMLPart = nil) and (Info = _T_H) then
+      if (FTextHTMLPart = nil) and (Info = _T_H) then   //clq 这里就是得到 html 内容
       begin
 
         if Part.Decode then
@@ -5219,7 +5237,7 @@ procedure TMailMessage2000.FindParts;
           FTextHTMLPart := Part;
 
           GetMem(Buffer, Part.FDecoded.Size+1);
-          StrLCopy(Buffer, Part.FDecoded.Memory, Part.FDecoded.Size);
+          StrLCopy(Buffer, Part.FDecoded.Memory, Part.FDecoded.Size);  //clq 这里是已经解码过字符集的了，所以取这里不是原始二进制内容
           Buffer[Part.FDecoded.Size] := #0;
           FTextHTML.SetText(Buffer);
           FreeMem(Buffer);
@@ -5298,6 +5316,8 @@ procedure TMailMessage2000.FindParts;
 
     // Check for texts (when message has alternative texts)
 
+    //clq html 的入口是这里，其实不一定，所以还要再修改，实际上现在邮件可以加为 html 内容的地方非常多
+    //以后再改进了//ll
     if (FAlternativePart <> nil) and (Part.FOwnerPart = FAlternativePart) then
     begin
 
