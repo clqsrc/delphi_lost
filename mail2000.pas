@@ -2,6 +2,7 @@
 //目前最新代码位于 https://github.com/clqsrc/delphi_lost
 
 // 2019/7/24 21:56:42 增加了一个邮件 mime 各个部分的未解码字符集的原始字符串属性，因为 utf-8 的 html 显示时需要。参考 self.Decoded_Bin 相关代码
+// 2019/7/31 19:53:11 GetTimeZoneBias: Double; //这个函数实际上是得到 delphi 的小时数值的表示//1 就表示 24 个小时，所以要得到 8 小时的 delphi tdatetime 值就是 8 除以 24
 
 (*
 
@@ -2182,7 +2183,16 @@ var
   TzInfo: TTimeZoneInformation;
 
 begin
-  Result := GetTimeZoneBias_v2; Exit; //clq 
+  Result := GetTimeZoneBias_v2;
+
+  //GetTimeZoneBias_v2 得到的是小时数，所以还要除以 24
+  Result := Result / 24; // 2019/7/31 19:50:28
+
+  //这个函数实际上是得到 delphi 的小时数值的表示
+  //1 就表示 24 个小时，所以要得到 8 小时的 delphi tdatetime 值就是 8 除以 24
+
+
+  Exit; //clq
 
   case GetTimeZoneInformation(TzInfo) of
 
