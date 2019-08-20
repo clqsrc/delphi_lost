@@ -259,6 +259,26 @@ begin
 
 end;  
 
+//是否可读取
+function SelectRead_TimeOut(so:TSocket; timeout_sec:Integer):Integer;
+var
+  fd_read:TFDSet;
+  timeout : TTimeVal;
+begin
+  Result := 0;
+
+  FD_ZERO( fd_read );
+  FD_SET(so, fd_read );
+
+  timeout.tv_sec := timeout_sec; //秒
+  timeout.tv_usec := 500;  //毫秒
+  timeout.tv_usec := 0;  //毫秒
+
+  if select( 0, @fd_read, nil, nil, @timeout ) > 0 then //至少有1个等待Accept的connection
+    Result := 1;
+
+end;  
+
 //是否可发送
 function SelectSend(so:TSocket):Integer;
 var
