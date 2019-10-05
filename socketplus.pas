@@ -11,7 +11,11 @@ interface
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   Dialogs, StdCtrls, IdBaseComponent, IdComponent, IdTCPConnection,
+  Math,
   IdTCPClient, Sockets, WinSock;
+
+type
+  TCmds = array of string;  
 
 function CreateTcpClient:TSocket;
 
@@ -19,13 +23,20 @@ function ConnectIP(so:TSocket; const ip:string; port:Integer):Integer;
 function ConnectHost(so:TSocket; const host:string; port:Integer):Integer;
 function SendBuf(so:TSocket; const s:string):Integer;
 //简单的协议分析建议直接在定时器调用即可
-function RecvBuf(so:TSocket):string;
+function RecvBuf(so:TSocket; var err:Integer):string;
 //只否可读取
 function SelectRead(so:TSocket):Integer;
 //只否可发送
 function SelectSend(so:TSocket):Integer;
 //设置为非阻塞模式
 procedure SetNoBlock(so:TSocket);
+
+//这其实是一个字符串分隔函数，在网络编程中是很常用的，参考另外两个 github 项目
+//https://github.com/clqsrc/c_lib_lstring/blob/master/email_book/SocketTest1.java
+//https://github.com/clqsrc/c_lib_lstring/blob/master/email_book/book_11/socket_test1.c
+//解码一行命令,这里比较简单就是按空格进行分隔就行了
+//void DecodeCmd(lstring * line, char sp, char ** cmds, int cmds_count)
+function DecodeCmd(line:string; sp:AnsiChar; cmds_count:string):TCmds;
 
 implementation
 
@@ -173,7 +184,7 @@ begin
 	result := is_connect;
 end;//
 
-//尚未精测试,可能有误
+//尚未精确测试,可能有误
 function SendBuf(so:TSocket; const s:string):Integer;
 var
   r,count:Integer;
@@ -208,7 +219,7 @@ begin
 
 end;
 
-function RecvBuf(so:TSocket):string;
+function RecvBuf(so:TSocket;var err:Integer):string;
 var
   buf:array[0..1024] of AnsiChar;
   r:Integer;
@@ -219,6 +230,7 @@ begin
 
   s := '';
   Result := '';
+  err := 0;
 
   r := recv(so, buf, SizeOf(buf)-1, 0); //留下一个 #0 结尾
   if r > 0 then
@@ -230,7 +242,8 @@ begin
 
   if r = 0 then //一般都是断开了
   begin
-    MessageBox(0, 'recv error.[socket close]', '', 0);
+    //正式环境中不能这样处理//MessageBox(0, 'recv error.[socket close]', '', 0);
+    err := 1;
 
     Exit;
   end;
@@ -313,6 +326,57 @@ begin
 	ioctlsocket(so, FIONBIO, arg);
 
 end;//
+
+
+//这其实是一个字符串分隔函数，在网络编程中是很常用的，参考另外两个 github 项目
+//https://github.com/clqsrc/c_lib_lstring/blob/master/email_book/SocketTest1.java
+//https://github.com/clqsrc/c_lib_lstring/blob/master/email_book/book_11/socket_test1.c
+//解码一行命令,这里比较简单就是按空格进行分隔就行了
+//void DecodeCmd(lstring * line, char sp, char ** cmds, int cmds_count)
+function DecodeCmd(line:string; sp:AnsiChar; cmds_count:string):TCmds;
+//var
+//  sl:TStringList; //Delimiter, DelimitedText 来分隔字符串其实是有问题的（主要是对空格和 #0 也会换行等），这里重新实现
+var
+  i,index:Integer;
+  cmd:string;
+  c:AnsiChar;
+begin
+  //给 64 个预先分配的好了
+  //SetLength(Result, 64);
+
+  index := 0;
+  cmd := '';
+
+  for i := 1 to Length(line) do
+  begin
+    c := line[i];
+
+
+    if c = sp then
+    begin
+      SetLength(Result, index+1);
+      Result[index] := cmd;
+      
+      index := index +1;
+      Continue;
+    end;  
+
+    cmd := cmd + c;
+  end;
+
+  //如果还有剩余的
+  if Length(cmd)>0 then
+  begin
+    index := index +1;
+    
+    SetLength(Result, index+1);
+    Result[index] := cmd;
+  end;
+
+  //给 64 个预先分配的好了
+  SetLength(Result, max(64, Length(Result)));
+
+end;
 
 
 end.
