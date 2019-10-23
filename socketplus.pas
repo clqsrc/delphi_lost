@@ -213,7 +213,7 @@ begin
       MessageBox(0, 'send error', '', 0);
 
       Exit;
-    end;  
+    end;
 
   end;
 
@@ -224,6 +224,7 @@ var
   buf:array[0..1024] of AnsiChar;
   r:Integer;
   s:string;
+  eno:Integer;
 begin
 
   FillChar(buf, sizeof(buf), $0);
@@ -246,6 +247,27 @@ begin
     err := 1;
 
     Exit;
+  end;
+
+  //if (r <= 0)
+  if (r < 0) then
+  begin
+    //到了连接被断开的时候WSAGetLastError返回既不是WSAECONNRESET也不是WSAECONNABORT。。。
+    eno := WSAGetLastError();
+
+    //if (eno == WSAECONNRESET && eno == WSAECONNABORTED)
+    ////if (eno != WSAEWOULDBLOCK) then//按 delphi ScktComp.pas 的源码,返回值为 0 时是不处理的,当返回值为 -1 时只要判断是否为 WSAEWOULDBLOCK 就可以了//发送时也是一样的
+    //2019 断开 wifi 还是测不出的，所以还是手工判断心跳最好
+    if (eno <> WSAEWOULDBLOCK) then//按 delphi ScktComp.pas 的源码,返回值为 0 时是不处理的,当返回值为 -1 时只要判断是否为 WSAEWOULDBLOCK 就可以了//发送时也是一样的
+    begin
+      //is_connect = false;//断开了
+
+      //正式环境中不能这样处理//MessageBox(0, 'recv error.[socket close]', '', 0);
+      err := 1;
+
+      Exit;
+    end;
+
   end;
 
   Result := s;
