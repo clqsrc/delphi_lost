@@ -22,6 +22,9 @@ function CreateTcpClient:TSocket;
 function ConnectIP(so:TSocket; const ip:string; port:Integer):Integer;
 function ConnectHost(so:TSocket; const host:string; port:Integer):Integer;
 function SendBuf(so:TSocket; const s:string):Integer;
+//直接来自 SendBuf ，只是不 sleep 等待而已
+function SendBuf_NoBlock(so:TSocket; const s:string):Integer;
+function SendBuf_TimeOut(so:TSocket; const s:string; TimeOut_second:Integer):Integer;
 //简单的协议分析建议直接在定时器调用即可
 function RecvBuf(so:TSocket; var err:Integer):string;
 //只否可读取
@@ -184,11 +187,12 @@ begin
 	result := is_connect;
 end;//
 
-//尚未精确测试,可能有误
-function SendBuf(so:TSocket; const s:string):Integer;
+//尚未精确测试,可能有误//这个其实是原来的 SendBuf 函数，需要等待一段时间，如果不想，则使用 SendBuf_NoBlock
+function SendBuf_TimeOut(so:TSocket; const s:string; TimeOut_second:Integer):Integer;
 var
   r,count:Integer;
   p:PAnsiChar;
+  buf_len:Integer;
 begin
   r := 0;
   Result := 0;
@@ -198,19 +202,89 @@ begin
   while Result<Length(s) do
   begin
     //r := send(so, s[1], Length(s), 0)      s[1+Result]
-    r := send(so, p^, Length(s)-Result, 0);
+    buf_len := Length(s)-Result;
+    buf_len := Min(buf_len, 4096);
+
+    //r := send(so, p^, Length(s)-Result, 0);     ll 似乎要控制一下最大长度，要不一次发不出去 //例如 unit Forms; 的整个文件
+    r := send(so, p^, buf_len, 0);     //ll 似乎要控制一下最大长度，要不一次发不出去 //例如 unit Forms; 的整个文件
+
     if  r > 0 then
     begin
       Result := Result + r;
+
+      if Result >= Length(s) then Exit; //安全一点，长度超过就不要操作指针了
       p := p + r;
+
+      Continue;
     end;
 
 
     inc(count);
+    Sleep(500);  //如果是太长的数据太是要 sleep 一下，等待操作系统把数据发送后再发下一个数据块//以 226k 的 Forms.pas 为例子，发送 10 次入可成功，性能还是很好的
+
+    //if count>10 then
+    if count > TimeOut_second * 2 then
+    begin
+      //MessageBox(0, 'send error', '', 0);
+
+      Result := -1;
+
+      Exit;
+    end;
+
+  end;
+
+end;
+
+//尚未精确测试,可能有误//大概最多等待 10 * 0.5 = 5 秒
+function SendBuf(so:TSocket; const s:string):Integer;
+begin
+
+  Result := SendBuf_TimeOut(so, s, 5);
+
+
+end;
+
+//直接来自 SendBuf ，只是不 sleep 等待而已
+function SendBuf_NoBlock(so:TSocket; const s:string):Integer;
+var
+  r,count:Integer;
+  p:PAnsiChar;
+  buf_len:Integer;
+begin
+  r := 0;
+  Result := 0;
+  count := 0;
+  p := @s[1];
+
+  while Result<Length(s) do
+  begin
+    //r := send(so, s[1], Length(s), 0)      s[1+Result]
+    buf_len := Length(s)-Result;
+    buf_len := Min(buf_len, 4096);
+
+    //r := send(so, p^, Length(s)-Result, 0);     ll 似乎要控制一下最大长度，要不一次发不出去 //例如 unit Forms; 的整个文件
+    r := send(so, p^, buf_len, 0);     //ll 似乎要控制一下最大长度，要不一次发不出去 //例如 unit Forms; 的整个文件
+
+    if  r > 0 then
+    begin
+      Result := Result + r;
+
+      if Result >= Length(s) then Exit; //安全一点，长度超过就不要操作指针了
+      p := p + r;
+
+      Continue;
+    end;
+
+
+    inc(count);
+    ////Sleep(500);  //如果是太长的数据太是要 sleep 一下，等待操作系统把数据发送后再发下一个数据块//以 226k 的 Forms.pas 为例子，发送 10 次入可成功，性能还是很好的
 
     if count>10 then
     begin
-      MessageBox(0, 'send error', '', 0);
+      //MessageBox(0, 'send error', '', 0);
+
+      Result := -1;
 
       Exit;
     end;
