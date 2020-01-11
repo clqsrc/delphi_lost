@@ -327,6 +327,7 @@ begin
   if (r < 0) then
   begin
     //到了连接被断开的时候WSAGetLastError返回既不是WSAECONNRESET也不是WSAECONNABORT。。。
+    eno := 0;
     eno := WSAGetLastError();
 
     //if (eno == WSAECONNRESET && eno == WSAECONNABORTED)
