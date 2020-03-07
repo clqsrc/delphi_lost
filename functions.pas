@@ -73,8 +73,27 @@ function sp_str_right(in_s:string; sp:string):string;
 //  ShowMessage(get_value_sp('key=value;', '', '='));  //应当为 key
 function get_value_sp(in_s:string; b_sp:string; e_sp:string):string;
 
+//[2-6]当前程序的路径
+function app_path1:string;
+
+//[2-7]shellexecute的简化版本
+procedure shellexecute1(filename1:string);
 
 implementation
+
+//[2-6]当前程序的路径
+function app_path1:string;
+begin
+  result:=extractfilepath(application.ExeName);
+end;
+
+//[2-7]shellexecute的简化版本
+procedure shellexecute1(filename1:string);
+begin
+  shellexecute(application.handle,nil,pchar(filename1),nil,nil,sw_shownormal);
+  //shellexecute(application.handle,'open',pchar(filename1),nil,nil,sw_shownormal);
+
+end;
 
 //应该是有问题的版本，暂时保留以备参考而已
 function get_value_old_v1(in1:string;b_sp1:string;e_sp1:string):string;

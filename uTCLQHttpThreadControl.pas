@@ -87,7 +87,6 @@ procedure Register;
 
 implementation
 
-uses clq_pub_pas1, clq_work_pub_pas1;
 
 { Important: Methods and properties of objects in visual components can only be
   used in a method called using Synchronize, for example,
