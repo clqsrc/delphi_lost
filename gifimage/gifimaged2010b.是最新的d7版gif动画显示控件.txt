@@ -1,0 +1,55 @@
+
+
+gifimaged2010b.是最新的d7版gif动画显示控件
+
+来自
+
+www.tolderlund.eu/delphi/gifimaged2010b.zip
+
+从
+https://www.baidu.com/baidu?wd=TGIFImage&tn=monline_4_dg&ie=utf-8
+>
+http://melander.dk/delphi/gifimage/
+>
+http://www.tolderlund.eu/delphi/
+跳转。
+
+
+信息来自 
+https://www.cnblogs.com/caibirdy1985/p/5780633.html
+
+--------------------------
+ Delphi 自带GIF控件的动画图片加载和播放
+
+delphi从CodeGear时期就已经将网上广为流传的TGIFImage控件（源文件名是GIFImage.pas）集成到VCL中，使用方法与原版的TGIFImage存放轻微差别，
+
+首先引用单元 Vcl.Imaging.GIFImg，配合 TImage 控件进行使用，具体如下：
+
+方法一：
+复制代码
+
+procedure LoadGIFImage(img: TImage);
+var
+  aGIFImage: TGIFImage;
+begin
+  aGIFImage:=TGIFImage.Create;
+  aGIFImage.LoadFromFile('C:\test.gif');
+  aGIFImage.Animate := True; //主要是多了这句来激活，否则就是一张静止图
+  img.Picture.Assign(aGIFImage);
+  aGIFImage.Free;
+end;
+
+复制代码
+
+方法二：
+复制代码
+
+  
+procedure LoadGIFImage(img: TImage);
+begin
+  img.Picture.LoadFromFile('C:\test.gif');
+  if img.Picture.Graphic is TGIFImage then
+    TGIFImage(img.Picture.Graphic).Animate := True;
+end;
+
+复制代码
