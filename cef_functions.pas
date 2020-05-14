@@ -12,14 +12,26 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  HTTPApp,
+
+  {$IFDEF FPC}
+
+  {$ELSE}
+     HTTPApp,
+  {$ENDIF}
+
+
   cefvcl,
   ceflib,
-  Dialogs, sp1, StdCtrls,  ExtCtrls, Buttons;
+  Dialogs, StdCtrls,  ExtCtrls, Buttons;
   
 
 //在 cef2623 的事件中调用相应的函数即可
 procedure CEF_BeforeContextMenu(Sender: TObject;
+  const browser: ICefBrowser; const frame: ICefFrame;
+  const params: ICefContextMenuParams; const model: ICefMenuModel);
+
+//这个是空白菜单的版本
+procedure CEF_BeforeContextMenu_blank(Sender: TObject;
   const browser: ICefBrowser; const frame: ICefFrame;
   const params: ICefContextMenuParams; const model: ICefMenuModel);
 
@@ -33,6 +45,17 @@ procedure CEF_BeforeDownload(Sender: TObject;
   const suggestedName: ustring; const callback: ICefBeforeDownloadCallback);
 
 implementation
+
+procedure CEF_BeforeContextMenu_blank(Sender: TObject;
+  const browser: ICefBrowser; const frame: ICefFrame;
+  const params: ICefContextMenuParams; const model: ICefMenuModel);
+begin
+  //model.AddItem(CUSTOMMENUCOMMAND_INSPECTELEMENT, 'Inspect Element'); //clq 2019 这里加入了一个右键菜单
+  model.Clear(); //clq 这样就可以清除右键菜单了
+
+  //其实还应该判断是否是 edit 这些控件，如果是的话不应该清空
+
+end;
 
 //另存为的菜单，原理见 http://newbt.net/ms/vdisk/show_bbs.php?id=1C3BFE02EA55AAF751915FE5AFD58BEC&pid=164
 //1.1 首先在 BeforeContextMenu 事件中加入菜单项目,加入项目时要象早期的 VC 菜单一样订好菜单的命令 ID ,然后要在另外一个事件中根据这个命令 ID 执行不同的操作.
