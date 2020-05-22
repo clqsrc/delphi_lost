@@ -49,9 +49,38 @@ implementation
 procedure CEF_BeforeContextMenu_blank(Sender: TObject;
   const browser: ICefBrowser; const frame: ICefFrame;
   const params: ICefContextMenuParams; const model: ICefMenuModel);
+var
+  i:Integer;
+  s:String;
+  id:Integer;
+  bDfaultMenu:Boolean; //是否是缺省菜单
 begin
   //model.AddItem(CUSTOMMENUCOMMAND_INSPECTELEMENT, 'Inspect Element'); //clq 2019 这里加入了一个右键菜单
-  model.Clear(); //clq 这样就可以清除右键菜单了
+
+  bDfaultMenu := False;
+  for i := 0 to model.GetCount()-1 do
+  begin
+    s  := model.GetLabelAt(i);
+    id := model.GetCommandIdAt(i);
+
+    //ShowMessage(IntToStr(id));
+
+    if LowerCase(Trim(s))='&back' then bDfaultMenu := True; //有返回菜单就认为是，其实并不准确
+    if 100 = id then bDfaultMenu := True; //有返回菜单就认为是，其实并不准确
+  end;
+
+  if model.GetCount<7 Then //这只是个临时用的取巧方法，当是编辑器是菜单项比较少
+  begin
+    //model.get;
+    //model.Clear(); //clq 这样就可以清除右键菜单了
+  end;
+
+  if bDfaultMenu Then model.Clear;      //model.Remove();
+
+  //params.;
+  //model.SetLabel(); //其实也可以将菜单项中文化，当然也可以修改命令参数
+
+  //model.Clear(); //clq 这样就可以清除右键菜单了
 
   //其实还应该判断是否是 edit 这些控件，如果是的话不应该清空
 

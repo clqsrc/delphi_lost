@@ -29,6 +29,11 @@ function SendBuf_TimeOut(so:TSocket; const s:string; TimeOut_second:Integer):Int
 function RecvBuf(so:TSocket; var err:Integer):string;
 //只否可读取
 function SelectRead(so:TSocket):Integer;
+
+//只否可读取,并判断是否已断开连接
+//2020 已经连接的情况下调用，可以判断连接是否已经断开
+function SelectRead_CheckClose(so:TSocket; var is_close:Integer):Integer;
+
 //只否可发送
 function SelectSend(so:TSocket):Integer;
 //设置为非阻塞模式
@@ -350,6 +355,10 @@ begin
 end;
 
 //是否可读取
+//2020 其实也返回 0 和 1 是不对的，因为实际上有3种情况：
+//socket 有数据，可读取
+//socket 无数据，不可读取
+//socket 出错了,比如 socket 被关闭了,socket 还没连接上等等
 function SelectRead(so:TSocket):Integer;
 var
   fd_read:TFDSet;
@@ -367,7 +376,78 @@ begin
   if select( 0, @fd_read, nil, nil, @timeout ) > 0 then //至少有1个等待Accept的connection
     Result := 1;
 
+end;
+
+
+//2020 已经连接的情况下调用，可以判断连接是否已经断开
+//一般是在 socket 函数返回 -1 的时候进行检查，因为返回 -1 的时候大多时出现了错误（可能是对方直接断开，或者本地直接 closesocket等等）
+//这个是 windows 专用的，linux 下似乎应该是判断 errno
+function Windows_CheckSocketClose_AtSocketError(so:TSocket):Integer;
+var
+  eno:Integer;
+  is_connect:Integer;
+  is_close:Integer;
+begin
+  Result := 0; //没断开
+  is_connect := 1; //没断开
+  is_close := 0; //没断开
+
+  //if (r < 0) then
+  begin
+    //到了连接被断开的时候WSAGetLastError返回既不是WSAECONNRESET也不是WSAECONNABORT。。。
+    eno := 0;
+    eno := WSAGetLastError();
+
+    //if (eno == WSAECONNRESET && eno == WSAECONNABORTED)
+    ////if (eno != WSAEWOULDBLOCK) then//按 delphi ScktComp.pas 的源码,返回值为 0 时是不处理的,当返回值为 -1 时只要判断是否为 WSAEWOULDBLOCK 就可以了//发送时也是一样的
+    //2019 断开 wifi 还是测不出的，所以还是手工判断心跳最好
+    if (eno <> WSAEWOULDBLOCK) then//按 delphi ScktComp.pas 的源码,返回值为 0 时是不处理的,当返回值为 -1 时只要判断是否为 WSAEWOULDBLOCK 就可以了//发送时也是一样的
+    begin
+      //is_connect = false;//断开了
+
+      //正式环境中不能这样处理//MessageBox(0, 'recv error.[socket close]', '', 0);
+      //err := 1;
+      is_connect := 0;
+      is_close := 1;
+
+      //Exit;
+    end;
+
+  end;  
+
+  Result := is_close;
 end;  
+
+//2020 已经连接的情况下调用，可以判断连接是否已经断开
+function SelectRead_CheckClose(so:TSocket; var is_close:Integer):Integer;
+var
+  fd_read:TFDSet;
+  timeout : TTimeVal;
+  r:Integer;
+begin
+  Result := 0;  //无数据可读取
+
+  is_close := 0;
+
+  FD_ZERO( fd_read );
+  FD_SET(so, fd_read );
+
+  timeout.tv_sec := 0; //秒
+  timeout.tv_usec := 500;  //毫秒
+  timeout.tv_usec := 0;  //毫秒
+
+  r := select( 0, @fd_read, nil, nil, @timeout );
+
+  if  r > 0 then //至少有1个等待Accept的connection   //有数据可读取
+    Result := 1;
+
+  if r < 0 then //返回值为 -1 时就是错误了
+  begin
+    if 1 = Windows_CheckSocketClose_AtSocketError(so)
+    then is_close := 1;  //一般来说这样的话就确实是断开了
+  end;  
+
+end;
 
 //是否可读取
 function SelectRead_TimeOut(so:TSocket; timeout_sec:Integer):Integer;
