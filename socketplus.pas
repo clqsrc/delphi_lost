@@ -27,14 +27,14 @@ function SendBuf_NoBlock(so:TSocket; const s:string):Integer;
 function SendBuf_TimeOut(so:TSocket; const s:string; TimeOut_second:Integer):Integer;
 //简单的协议分析建议直接在定时器调用即可
 function RecvBuf(so:TSocket; var err:Integer):string;
-//只否可读取
+//是否可读取
 function SelectRead(so:TSocket):Integer;
 
-//只否可读取,并判断是否已断开连接
+//是否可读取,并判断是否已断开连接
 //2020 已经连接的情况下调用，可以判断连接是否已经断开
 function SelectRead_CheckClose(so:TSocket; var is_close:Integer):Integer;
 
-//只否可发送
+//是否可发送
 function SelectSend(so:TSocket):Integer;
 //设置为非阻塞模式
 procedure SetNoBlock(so:TSocket);
@@ -355,7 +355,7 @@ begin
 end;
 
 //是否可读取
-//2020 其实也返回 0 和 1 是不对的，因为实际上有3种情况：
+//2020 其实只返回 0 和 1 是不对的，因为实际上有3种情况：
 //socket 有数据，可读取
 //socket 无数据，不可读取
 //socket 出错了,比如 socket 被关闭了,socket 还没连接上等等
