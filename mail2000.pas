@@ -850,7 +850,7 @@ const
 
 implementation
 
-uses clq_pub_pas1, clq_work_pub_pas1;
+uses clq_pub_pas1, clq_work_pub_pas1, utf8_decode;
 
 const
   _C_T  = 'Content-Type';
@@ -5100,7 +5100,11 @@ begin
     //Texto := Utf8Decode(Texto);
     //Texto := Utf8ToAnsi(Texto);
     //utf8 解码可能出错，所以还要再处理一下。以后再用 iconv 等加强
+    //比如 https://github.com/unbug/codelf/issues/93  中的头两个火焰就转换不了
     result := Utf8ToAnsi(Texto);
+
+    //2020//手动解码 //delphi7 是解码不了笑脸符的
+    if result='' then result := Utf8Decode_manual(Texto);
 
     if result='' then result := Texto; //有些标题，例如 pinterest 的信件中中间标题就是错误的(至少现在 [2018 年] 是这样)，所以要再恢复一下
 
@@ -5119,12 +5123,56 @@ end;
 
 // Get the subject
 
+//2020 做个简单易懂的算法
+//1.假设标题都是由 [=?][?=] 分隔的，如果不是返回原值
+//2.有些服务器连单行中都有可能是由多个 [=?][?=] 对组成的，所以还要再分隔
+//3.有些服务器的编码并不完全一致，所以每个 [=?][?=] 中的内容要单独解码最后再合并
+//4.以后 [=?][?=] 中内容的解码也要独立重写，现在可以用原来的
+//5.其实有些很长的文件名也是要用这个函数的，以后再改
+function DecodeSubject(s:string):string;
+var
+  sl:TStringList;
+  i:Integer;
+  line:string;
+begin
+  Result := '';
+
+  ////s := StringReplace(s, '?=', '?='#13#10, [rfReplaceAll]);  //把每个 ?= 折行
+  //这里有个非常特殊的情况，如果编码是 Q 而不是 B 就会形成 [Q?=] 这样的伪折行
+  //处理办法应该是先处理 [Q?=]可以加一个空格，当然应该还有更好的，不过这样也不错
+  s := StringReplace(s, 'Q?=', 'Q? =', [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行 //[Q?=] 特殊处理
+  s := StringReplace(s, '?=', '?='#13#10, [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行
+
+  sl := TStringList.Create;
+  //sl.Text := GetLabelValue('Subject');
+
+  sl.Text := s;
+
+  for i := 0 to sl.Count-1 do
+  begin
+    line := sl.Strings[i];
+
+    line := Trim(line); //还是要去除空白
+
+    //恢复 [Q?=] 比较好，其实不恢复也就多个空格而已
+    line := StringReplace(line, 'Q? =', 'Q?=', [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行 //[Q?=] 特殊处理
+
+    if ('' = line) then Continue;
+
+    Result := Result + DecodeLine7Bit_m(line);
+  end;
+
+  sl.Free;
+end;
+
 function TMailMessage2000.GetSubject: String;
 var
   sl:TStringList;
   i:Integer;
   sCharset: string;
 begin
+
+  Result := DecodeSubject( GetLabelValue('Subject')); Exit;  //2020
 
   //Result := DecodeLine7Bit(GetLabelValue('Subject'));
 
