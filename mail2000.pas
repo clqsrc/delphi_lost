@@ -394,6 +394,7 @@ type
 
     procedure Fill(Data: PChar; HasHeader: Boolean);
     procedure SetSource(const Text: String);
+    function GetHeader(const cLabel: String): String;
 
   public
     charset:string; // 2019/7/24 21:30:08//clq add 这个部分的字符集，例如 utf-8,gb2312 //已经转化为全小写  
@@ -850,7 +851,11 @@ const
 
 implementation
 
-uses clq_pub_pas1, clq_work_pub_pas1, utf8_decode;
+uses
+  clq_pub_pas1,
+  clq_work_pub_pas1,
+  Functions,
+  utf8_decode;
 
 const
   _C_T  = 'Content-Type';
@@ -3248,8 +3253,36 @@ begin
   inherited Destroy;
 end;
 
-// Return the value of a label from the header like "To", "Subject"
+//键值对中的值，其实还要去掉第一个空白，并且去掉双引号或者单引号
+function GetValue_UnFormat(v:string):string;
+begin
+  if Length(v)<1 then Exit;
 
+  if (v[1] in [' ', #9]) then  //第一个字符是空白，要去掉
+  begin
+    v[1] := ' ';
+
+    v := Copy(v, 2, Length(v)-1);
+  end;
+
+  Result := v;
+
+  //去掉单引号或者双引号
+  if Length(Result) > 2 then
+  begin
+
+    if (Result[1] in ['"', #39]) and
+       (Result[Length(Result)] in ['"', #39]) then
+      Result := Copy(Result, 2, Length(Result)-2);
+  end;  
+
+
+end;
+
+// Return the value of a label from the header like "To", "Subject"
+//这个注释其实不对，实际上它取得值之后还去掉了附加属性的值，例如
+//GetLabelValue 对于 Content-Type: text/html; charset=utf-8 取得的是 [text/html] 而不是完整的 [Content-Type: text/html; charset=utf-8]
+//所以为了得到完整的值，另外定义了一个函数 GetHeader，以便去解码邮件标题这样的，因为原始的 mail2000 解码标题是很差的  
 function TMailPart.GetLabelValue(const cLabel: String): String;
 var
   Loop,i: Integer;
@@ -3282,6 +3315,80 @@ begin
   end;
 
 
+  if Length(Result) > 2 then
+  begin
+
+    if (Result[1] in ['"', #39]) and
+       (Result[Length(Result)] in ['"', #39]) then
+      Result := Copy(Result, 2, Length(Result)-2);
+  end;
+end;
+
+
+//2020 修改自 GetLabelValue，原因参见其注释
+function TMailPart.GetHeader(const cLabel: String): String;
+var
+  Loop,i: Integer;
+  line:string;
+  key:string;
+  find:Boolean;            //已经找到了
+  find_this_line:Boolean;  //是在当前行找到的
+begin
+  // 2018-2-5 11:28:50 //clq 原来的代码有一个问题,头信息中有内容折行的情况,例如标题或者邮件服务器中的扩展信息
+  // 2020/7/4 18:27:46 //clq 修改为自己查找，并把 #9 替换为空格
+
+  Result := '';
+  //Loop := SearchStringList(FHeader, cLabel+':');
+
+  key := cLabel+':';
+
+  find := False;
+
+    
+  //--------------------------------------------------
+  // 2018-2-5 clq 从这一行开始后面以空格或者 tab 开头的其实都算是它的内容,因为是折行后的
+  for i := 0 to FHeader.Count-1 do
+  begin
+    line := FHeader[i];
+
+    find_this_line := False;
+
+    if FindStrLeft(key, line) then
+    begin
+      find := True;
+      find_this_line := True;
+    end;
+
+    if find<>True then
+     Continue;
+
+    if Length(line)<1 then Break;
+
+    if find_this_line<>True then //不是本行找到的，就要看第一个字符是否是空白
+    begin
+
+      if not(line[1] in [' ', #9]) then
+      begin
+        find := False;
+        Break; //不是空格和 tab 开头就跳出了
+      end
+      else line[1] := ' '; //#9 [tab] 要替换成空格
+
+      line := GetValue_UnFormat(line);
+
+      Result := Result + #13#10 + line; //clq 2018 还是加硬回车，后面再处理
+    end
+    else
+    begin
+      line := GetValue_UnFormat(sp_str_right(line, key));
+      Result := Result + line; //2020 本行找到的不加回车//其实还要去掉第一个空白
+    end;
+
+  end;
+  //--------------------------------------------------
+
+
+  //去掉单引号或者双引号
   if Length(Result) > 2 then
   begin
 
@@ -5069,7 +5176,7 @@ begin
           begin
 
             GetMem(Buffer, Length(Texto));
-            Size := DecodeLineUUCODE(Texto, Buffer);
+            Size := DecodeLineUUCODE(Texto, Buffer);  //2020 这个有异常
             Buffer[Size] := #0;
             Texto := String(Buffer);
 
@@ -5140,8 +5247,11 @@ begin
   ////s := StringReplace(s, '?=', '?='#13#10, [rfReplaceAll]);  //把每个 ?= 折行
   //这里有个非常特殊的情况，如果编码是 Q 而不是 B 就会形成 [Q?=] 这样的伪折行
   //处理办法应该是先处理 [Q?=]可以加一个空格，当然应该还有更好的，不过这样也不错
-  s := StringReplace(s, 'Q?=', 'Q? =', [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行 //[Q?=] 特殊处理
-  s := StringReplace(s, '?=', '?='#13#10, [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行
+////  s := StringReplace(s, 'Q?=', 'Q? =', [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行 //[Q?=] 特殊处理
+////  s := StringReplace(s, '?=', '?='#13#10, [rfReplaceAll, rfIgnoreCase]);  //把每个 ?= 折行
+  //s := StringReplace(s, '=?', #13#10'=?', [rfReplaceAll, rfIgnoreCase]);  //把每个 =? 折行
+  //不对，为了区别开，[=?] 前是要有空格的（即应该是 [[SP]=?]），否则会与 base64 的结束符号冲突，例如 [=?.B...=?=] 这里最后的 [=?=] 会被折到下一行导致解码失败
+  s := StringReplace(s, ' =?', #13#10' =?', [rfReplaceAll, rfIgnoreCase]);  //把每个 =? 折行
 
   sl := TStringList.Create;
   //sl.Text := GetLabelValue('Subject');
@@ -5172,7 +5282,9 @@ var
   sCharset: string;
 begin
 
-  Result := DecodeSubject( GetLabelValue('Subject')); Exit;  //2020
+  //Result := DecodeSubject( GetLabelValue('Subject')); Exit;  //2020
+  Result := DecodeSubject( GetHeader('Subject')); Exit;  //2020
+
 
   //Result := DecodeLine7Bit(GetLabelValue('Subject'));
 
@@ -7201,12 +7313,37 @@ begin
 
 end;
 
-// =============================================================================
-//唐的算法有误已删除
-//标题：关于字符集的问题! 恳请指点!!唐晓峰请进!诸位专家请进! (100分)
-//Nuke2 (1999-5-25 20:26) 109912
+//----------------------------------------------------------------
+// 2020/7/4 21:42:32 //测试用例，主要是标题和文件名经常是有问题的
+
+procedure test1;
+var
+  subject:string;
+begin
+  subject := DecodeSubject('=?GB2312?B?u6rOqtDs1rG+/KO61tC5+tX+uK6yu7vhyMO7qs6q?=');
+
+  if subject<>'华为徐直军：中国政府不会让华为' then ShowMessage('mail2000 test1 error');
+
+  subject := DecodeSubject(' =?UTF-8?Q?[unbug/codelf]?='#13#10 +
+    ' =?UTF-8?Q?_=F0=9F=94=A5=F0=9F=94=A5=E3=80=90=E4=BD=9C=E8=80=85=E4=BA=B2=E8=87=AA=E5=86=85=E6=8E=A8=E3=80=91=E5=AD=97=E8=8A=82=E8=B7=B3=E5=8A=A8=E5=86=85=E6=8E=A8=EF=BC=8C=E9=95=BF=E6=9C=9F=E6=9C=89=E6=95=88?='#13#10 +
+    ' =?UTF-8?Q?_=28#93=29?=');
+
+  //'[unbug/codelf] 【作者亲自内推】字节跳动内推，长期有效 (#93)'
+  if False = FindStr('[unbug/codelf]', subject) then ShowMessage('mail2000 test1 error');
+  if False = FindStr('【作者亲自内推】字节跳动内推，长期有效', subject) then ShowMessage('mail2000 test1 error');
+  if False = FindStr('(#93)', subject) then ShowMessage('mail2000 test1 error');
+
+  subject := DecodeSubject(' =?UTF-8?Q?=E9=99=88=E7=AB=8B=E5=BC=BA=EF=BC=8C=E9=87=8C=E9=9D=A2=E6=98=AF=E6=82=A8=E7=9A=84?='#13#10 +
+    ' =?UTF-8?Q?_6_=E6=9C=88_=E8=B4=A6=E6=88=B7=E4=BF=A1=E6=81=AF=E3=80=82?=');
+
+  if subject<>'陈立强，里面是您的 6 月 账户信息。' then ShowMessage('mail2000 test1 error');
+
+end;
+
 
 begin
 
   Randomize;
+
+  test1;
 end.

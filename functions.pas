@@ -82,7 +82,20 @@ procedure shellexecute1(filename1:string);
 //忽略大小写
 function FindStr(subs, s:string):Boolean;
 
+//忽略大小写//要查找的字符串就在整个字符串的左边
+function FindStrLeft(subs, s:string):Boolean;
+
+
 implementation
+
+function FindStrLeft(subs, s:string):Boolean;
+begin
+  s := LowerCase(s);         //其实从 xmpp 协议的角度来说不转也是可以是，不过为了算法通用还是转一下忽略大小写比较好
+  subs := LowerCase(subs);
+
+  //Result := Pos(subs, s)>0;
+  Result := Pos(subs, s) = 1;
+end;
 
 function FindStr(subs, s:string):Boolean;
 begin
