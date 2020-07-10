@@ -85,6 +85,9 @@ function FindStr(subs, s:string):Boolean;
 //忽略大小写//要查找的字符串就在整个字符串的左边
 function FindStrLeft(subs, s:string):Boolean;
 
+//用 html/icon 这样通用的字符集字符串来表示 CodePage
+function windows_api_ToUtf8(_CodePage:string; strGBK: AnsiString):AnsiString;
+
 
 implementation
 
@@ -340,5 +343,73 @@ begin
 
 end;
 
+//使用 windows api 将 gbk 转换成 utf8 //AnsiToUtf8 是本地字符集，在多语言环境下并不正确
+//来自网络
+function windows_codepage_2utf8(CodePage: UINT; strGBK: AnsiString):AnsiString; //(
+var
+  //strGBK: AnsiString;
+  strUTF8: AnsiString;
+  strUTF16: WideString;
+begin
+  //StrGBK := #$B2#$E2#$CA#$D4;//'测试'
+  //ShowMessage(strGBK);
+  SetLength(strUTF16, Length(strGBK));
+
+  //big5 应该是 950
+  //gbk 是 936
+  //SetLength(strUTF16,MultiByteToWideChar(936,0,PAnsiChar(strGBK), Length(strGBK),PWideChar(strUTF16),Length(strUTF16)));
+  SetLength(strUTF16,MultiByteToWideChar(CodePage, 0, PAnsiChar(strGBK), Length(strGBK),PWideChar(strUTF16),Length(strUTF16)));
+  strUTF8 := UTF8Encode(strUTF16);
+
+  //ShowMessage(strUTF8);
+  Result := strUTF8;
+end;
+
+function GBK2Utf8(strGBK: AnsiString):AnsiString; //(CodePage: UINT;
+begin
+  Result := windows_codepage_2utf8(936, strGBK);
+end;
+
+
+//警告：不完善
+//用 html/icon 这样通用的字符集字符串来表示 CodePage
+function windows_api_ToUtf8(_CodePage:string; strGBK: AnsiString):AnsiString;
+var
+  //strGBK: AnsiString;
+  strUTF8: AnsiString;
+  strUTF16: WideString;
+  CodePage: UINT;
+begin
+  CodePage := CP_ACP;
+
+  Result := '';
+
+  _CodePage := Trim(LowerCase(_CodePage));
+
+  if _CodePage = 'gbk' then CodePage := 936;
+  if _CodePage = 'big5' then CodePage := 950;
+
+  //中文
+  if _CodePage = 'gb2312' then CodePage := 936;
+  if _CodePage = 'gb18030' then CodePage := 936;  //应该是 54936 	GB18030//不过 xp 不支持
+
+  //怎样得到完整版本的其他字符集?
+  //微软 MultiByteToWideChar function 的说明中有
+  //https://docs.microsoft.com/zh-cn/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar
+  //https://docs.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
+
+  //StrGBK := #$B2#$E2#$CA#$D4;//'测试'
+  //ShowMessage(strGBK);
+  SetLength(strUTF16, Length(strGBK));
+
+  //big5 应该是 950
+  //gbk 是 936
+  //SetLength(strUTF16,MultiByteToWideChar(936,0,PAnsiChar(strGBK), Length(strGBK),PWideChar(strUTF16),Length(strUTF16)));
+  SetLength(strUTF16,MultiByteToWideChar(CodePage, 0, PAnsiChar(strGBK), Length(strGBK),PWideChar(strUTF16),Length(strUTF16)));
+  strUTF8 := UTF8Encode(strUTF16);
+
+  //ShowMessage(strUTF8);
+  Result := strUTF8;
+end;
 
 end.
