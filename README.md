@@ -3,6 +3,9 @@
 
 [注意，主要用于 delphi7]
 
+工作需要升级了一下 delphi11+ 的版本，在 
+https://github.com/clqsrc/delphi_lost_d11
+
 一些小的东西，不过可以组合生成一些非常好的效果，例子可以看我们的 "文本处理大师 迷你版"（注意不是标准版本）和 "eEmail"
 
 
